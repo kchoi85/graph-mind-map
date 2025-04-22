@@ -4,117 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Brainstorm Map</title>
-    <style>
-      body {
-        margin: 0;
-        overflow: hidden;
-        font-family: Arial, sans-serif;
-        background: #1e1e1e;
-      }
-      #controls {
-        position: fixed;
-        top: 10px;
-        left: 10px;
-        display: flex;
-        gap: 5px;
-        z-index: 1000;
-      }
-      #controls button {
-        background: #4caf50;
-        color: white;
-        border: none;
-        padding: 5px 10px;
-        font-size: 14px;
-        border-radius: 4px;
-        cursor: pointer;
-      }
-      #canvas {
-        position: relative;
-        width: 20000px;
-        height: 20000px;
-        background-size: 20px 20px;
-        cursor: grab;
-        transform-origin: 0 0;
-      }
-      svg {
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-      }
-      .node {
-        position: absolute;
-        border-radius: 50%;
-        background: #2c2c2c;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 2px solid;
-        opacity: 0;
-        transform: scale(0);
-        transition: opacity 0.2s ease, transform 0.2s ease;
-      }
-      .node.show {
-        opacity: 1;
-        transform: scale(1);
-      }
-      .delete-btn {
-        position: absolute;
-        top: -2px;
-        right: 12px;
-        width: 16px;
-        height: 16px;
-        background: #f44336;
-        color: white;
-        border-radius: 50%;
-        font-size: 12px;
-        line-height: 16px;
-        text-align: center;
-        cursor: pointer;
-        z-index: 1001;
-      }
-      .add-ideas {
-        position: absolute;
-        background: #4caf50;
-        color: white;
-        font-size: 12px;
-        padding: 5px 10px;
-        border-radius: 5px;
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      #input-container {
-        position: fixed;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.7);
-        padding: 10px;
-        border-radius: 10px;
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        width: 500px;
-      }
-      #main-idea-input {
-        width: 100%;
-        padding: 8px 10px;
-        font-size: 16px;
-        background: #1e1e1e;
-        border: 1px solid #4caf50;
-        color: white;
-        border-radius: 5px;
-      }
-      #submit-idea {
-        background: #4caf50;
-        border: none;
-        padding: 5px 10px;
-        font-size: 16px;
-        border-radius: 5px;
-        cursor: pointer;
-      }
-    </style>
+    <link rel="stylesheet" href="mind-map.style.css" />
   </head>
   <body>
     <div id="controls">
@@ -140,20 +30,24 @@
         const mainIdeaInput = document.getElementById('main-idea-input');
         const submitIdeaBtn = document.getElementById('submit-idea');
         const resetBtn = document.getElementById('reset-btn');
-        const fitBtn = document.getElementById('fit-btn');
+        const fitBoundsBtn = document.getElementById('fit-btn');
         const zoomInBtn = document.getElementById('zoom-in-btn');
         const zoomOutBtn = document.getElementById('zoom-out-btn');
 
         let mainIdea = '';
+
         let scale = 1,
           offsetX = 0,
           offsetY = 0;
+
         let isDraggingCanvas = false,
           startX = 0,
           startY = 0;
+
         let draggingNode = null,
           dragStartX = 0,
           dragStartY = 0;
+
         let subtreeNodes = [];
 
         const nodes = [];
@@ -177,6 +71,7 @@
           return rec && rec.parent ? 1 + getDepth(rec.parent) : 0;
         }
 
+        // Node dragging
         function onNodeMouseDown(e, nodeEl) {
           e.stopPropagation();
           e.preventDefault();
@@ -203,14 +98,36 @@
             el.style.left = newX + 'px';
             el.style.top = newY + 'px';
           });
-          updateLines();
-          updateButtons();
+          updateNodeLinks();
+          updateAddIdeaBtns();
         }
         function onNodeMouseUp() {
           window.removeEventListener('mousemove', onNodeMouseMove);
           window.removeEventListener('mouseup', onNodeMouseUp);
           draggingNode = null;
           subtreeNodes = [];
+        }
+        // End of node dragging
+
+        // Canvas Controls
+        function animateTransform(from, to, duration = 400) {
+          const start = performance.now();
+
+          function step(now) {
+            const t = Math.min((now - start) / duration, 1);
+            const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+            scale = from.scale + (to.scale - from.scale) * ease;
+            offsetX = from.offsetX + (to.offsetX - from.offsetX) * ease;
+            offsetY = from.offsetY + (to.offsetY - from.offsetY) * ease;
+
+            applyCanvasTransform();
+            updateNodeLinks();
+
+            if (t < 1) requestAnimationFrame(step);
+          }
+
+          requestAnimationFrame(step);
         }
 
         resetBtn.addEventListener('click', () => {
@@ -225,22 +142,7 @@
           applyCanvasTransform();
         });
 
-        function animateTransform(from, to, duration = 400) {
-          const start = performance.now();
-          function step(now) {
-            const t = Math.min((now - start) / duration, 1);
-            const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-            scale = from.scale + (to.scale - from.scale) * ease;
-            offsetX = from.offsetX + (to.offsetX - from.offsetX) * ease;
-            offsetY = from.offsetY + (to.offsetY - from.offsetY) * ease;
-            applyCanvasTransform();
-            updateLines();
-            if (t < 1) requestAnimationFrame(step);
-          }
-          requestAnimationFrame(step);
-        }
-
-        fitBtn.addEventListener('click', () => {
+        fitBoundsBtn.addEventListener('click', () => {
           const b = getBounds();
           if (!b) return;
           const pad = 100;
@@ -270,11 +172,15 @@
           const toScale = scale * factor;
           const toOffsetX = offsetX * factor + (1 - factor) * cx;
           const toOffsetY = offsetY * factor + (1 - factor) * cy;
-          animateTransform(from, {
-            scale: toScale,
-            offsetX: toOffsetX,
-            offsetY: toOffsetY,
-          });
+          animateTransform(
+            from,
+            {
+              scale: toScale,
+              offsetX: toOffsetX,
+              offsetY: toOffsetY,
+            },
+            200
+          );
         });
 
         zoomOutBtn.addEventListener('click', () => {
@@ -285,39 +191,47 @@
           const toScale = scale * factor;
           const toOffsetX = offsetX * factor + (1 - factor) * cx;
           const toOffsetY = offsetY * factor + (1 - factor) * cy;
-          animateTransform(from, {
-            scale: toScale,
-            offsetX: toOffsetX,
-            offsetY: toOffsetY,
-          });
+          animateTransform(
+            from,
+            {
+              scale: toScale,
+              offsetX: toOffsetX,
+              offsetY: toOffsetY,
+            },
+            200
+          );
         });
+        // End of canvas controls
 
-        function drawInitial() {
-          const cw = canvas.clientWidth,
-            ch = canvas.clientHeight;
-          const cx = cw / 2,
-            cy = ch / 2;
+        function drawInitialGraph() {
+          const cw = canvas.clientWidth;
+          const ch = canvas.clientHeight;
+          const cx = cw / 2;
+          const cy = ch / 2;
+
           const main = createNode(mainIdea, cx, cy, null, '#4caf50', 0);
-          ['1', '2', '3', '4', '5'].forEach((s, i) => {
+
+          [...Array(5).keys()].forEach((s, i) => {
             const angle = (i / 5) * 2 * Math.PI;
             const x = cx + 200 * Math.cos(angle),
               y = cy + 200 * Math.sin(angle);
             const col = randomPastelColor();
             const nd = createNode('Sub ' + s, x, y, main, col, angle);
-            createLink(main, nd);
-            const btn = createButton(nd);
+            createNodeLink(main, nd);
+            const btn = createNodeAddIdeaBtn(nd);
             buttons.push({ btn, node: nd });
           });
-          updateButtons();
+          updateAddIdeaBtns();
           fitBounds();
           applyCanvasTransform();
-          updateLines();
+          updateNodeLinks();
         }
-        function addMoreIdeas(parentNode) {
+
+        function handleAddMoreIdeas(parentNode) {
           // 1) clear existing subtree
           links
             .filter((l) => l.parent === parentNode)
-            .forEach((l) => removeSubtree(l.child));
+            .forEach((l) => deleteSubtree(l.child));
 
           const depth = 1 + getDepth(parentNode);
           const radius = 150 + depth * 100; // how far out from the parent
@@ -346,22 +260,24 @@
               color,
               ang
             );
-            createLink(parentNode, node);
-            const btn = createButton(node);
+            createNodeLink(parentNode, node);
+
+            const btn = createNodeAddIdeaBtn(node);
             buttons.push({ btn, node });
           });
 
-          updateButtons();
+          updateAddIdeaBtns();
           fitBounds();
           applyCanvasTransform();
-          updateLines();
+          updateNodeLinks();
         }
 
-        function removeSubtree(nodeEl) {
+        function deleteSubtree(nodeEl) {
           const rec = nodes.find((r) => r.el === nodeEl);
           const parentEl = rec.parent;
           // never delete main
           if (!parentEl) return;
+
           // ensure main always has >=1 child
           const parentRec = nodes.find((r) => r.el === parentEl);
           if (
@@ -371,19 +287,23 @@
             alert('Main node must have at least 1 child.');
             return;
           }
+
           // remove descendants
           links
             .filter((l) => l.parent === nodeEl)
-            .forEach((l) => removeSubtree(l.child));
+            .forEach((l) => deleteSubtree(l.child));
+
           // remove link lines
           links
             .filter((l) => l.child === nodeEl)
             .forEach((l) => linesSvg.removeChild(l.line));
+
           // clean links array
           for (let i = links.length - 1; i >= 0; i--) {
             if (links[i].parent === nodeEl || links[i].child === nodeEl)
               links.splice(i, 1);
           }
+
           // remove buttons
           for (let i = buttons.length - 1; i >= 0; i--) {
             if (buttons[i].node === nodeEl) {
@@ -391,26 +311,28 @@
               buttons.splice(i, 1);
             }
           }
+
           // remove node element
           const idx = nodes.findIndex((r) => r.el === nodeEl);
           if (idx > -1) {
             canvas.removeChild(nodeEl);
             nodes.splice(idx, 1);
           }
+
           // update UI
-          updateButtons();
-          updateLines();
+          updateAddIdeaBtns();
+          updateNodeLinks();
         }
 
-        function createButton(nodeEl) {
+        function createNodeAddIdeaBtn(nodeEl) {
           const btn = document.createElement('div');
           btn.className = 'add-ideas';
-          btn.addEventListener('click', () => addMoreIdeas(nodeEl));
+          btn.addEventListener('click', () => handleAddMoreIdeas(nodeEl));
           canvas.appendChild(btn);
           return btn;
         }
 
-        function updateButtons() {
+        function updateAddIdeaBtns() {
           buttons.forEach(({ btn, node }) => {
             const x = +node.dataset.x;
             const y = +node.dataset.y;
@@ -421,10 +343,8 @@
               ? 'Recreate Ideas'
               : '+ Add Ideas';
           });
-          updateDeleteButtons();
-        }
 
-        function updateDeleteButtons() {
+          // update delete buttons
           nodes.forEach(({ el, parent }) => {
             if (!parent) return;
             const siblings = links.filter((l) => l.parent === parent);
@@ -452,6 +372,7 @@
           const size = Math.max(40, base - depth * step);
           const x = cx - size / 2;
           const y = cy - size / 2;
+
           const node = document.createElement('div');
           node.className = 'node';
           node.innerText = text;
@@ -466,23 +387,28 @@
           node.style.height = size + 'px';
           node.style.borderColor = color;
           canvas.appendChild(node);
+
           if (parent !== null) {
             const del = document.createElement('div');
             del.className = 'delete-btn';
             del.textContent = '×';
             del.addEventListener('click', (e) => {
               e.stopPropagation();
-              removeSubtree(node);
+              deleteSubtree(node);
             });
+
             node.appendChild(del);
           }
+
           node.addEventListener('mousedown', (e) => onNodeMouseDown(e, node));
+
           requestAnimationFrame(() => node.classList.add('show'));
           nodes.push({ el: node, parent });
+
           return node;
         }
 
-        function createLink(parentNode, childNode) {
+        function createNodeLink(parentNode, childNode) {
           const line = document.createElementNS(
             'http://www.w3.org/2000/svg',
             'line'
@@ -493,13 +419,7 @@
           links.push({ line, parent: parentNode, child: childNode });
         }
 
-        function checkOverlap(x, y) {
-          return nodes.some(
-            ({ el }) => Math.hypot(x - +el.dataset.x, y - +el.dataset.y) < 150
-          );
-        }
-
-        function updateLines() {
+        function updateNodeLinks() {
           links.forEach(({ line, parent, child }) => {
             const px = +parent.dataset.x + +parent.dataset.size / 2;
             const py = +parent.dataset.y + +parent.dataset.size / 2;
@@ -518,15 +438,18 @@
             minY = Infinity,
             maxX = -Infinity,
             maxY = -Infinity;
+
           nodes.forEach(({ el }) => {
-            const x = +el.dataset.x,
-              y = +el.dataset.y,
-              s = +el.dataset.size;
+            const x = +el.dataset.x;
+            const y = +el.dataset.y;
+            const s = +el.dataset.size;
+
             minX = Math.min(minX, x);
             minY = Math.min(minY, y);
             maxX = Math.max(maxX, x + s);
             maxY = Math.max(maxY, y + s);
           });
+
           return {
             minX,
             minY,
@@ -552,7 +475,8 @@
           offsetY = window.innerHeight / 2 - cy * scale;
         }
 
-        function clampOffset() {
+        function applyCanvasTransform() {
+          // clamp offsetX and offsetY to prevent canvas from going out of bounds
           offsetX = Math.min(
             Math.max(offsetX, window.innerWidth - canvas.clientWidth * scale),
             0
@@ -561,10 +485,7 @@
             Math.max(offsetY, window.innerHeight - canvas.clientHeight * scale),
             0
           );
-        }
 
-        function applyCanvasTransform() {
-          clampOffset();
           canvas.style.transform = `translate(${offsetX}px,${offsetY}px) scale(${scale})`;
         }
 
@@ -574,6 +495,7 @@
           startY = e.clientY;
           canvas.style.cursor = 'grabbing';
         });
+
         window.addEventListener('mousemove', (e) => {
           if (!isDraggingCanvas) return;
           offsetX += (e.clientX - startX) / scale;
@@ -581,8 +503,8 @@
           startX = e.clientX;
           startY = e.clientY;
           applyCanvasTransform();
-          updateLines();
         });
+
         window.addEventListener('mouseup', () => {
           isDraggingCanvas = false;
           canvas.style.cursor = 'grab';
@@ -593,7 +515,7 @@
           if (!v) return alert('Main idea cannot be empty.');
           mainIdea = v;
           inputContainer.style.display = 'none';
-          drawInitial();
+          drawInitialGraph();
         });
       });
     </script>
