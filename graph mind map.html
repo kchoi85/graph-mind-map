@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brainstorm Map</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+        background: #1e1e1e;
+      }
+      #controls {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        display: flex;
+        gap: 5px;
+        z-index: 1000;
+      }
+      #controls button {
+        background: #4caf50;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        font-size: 14px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      #canvas {
+        position: relative;
+        width: 20000px;
+        height: 20000px;
+        background-size: 20px 20px;
+        cursor: grab;
+        transform-origin: 0 0;
+      }
+      svg {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      .node {
+        position: absolute;
+        border-radius: 50%;
+        background: #2c2c2c;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid;
+        opacity: 0;
+        transform: scale(0);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      }
+      .node.show {
+        opacity: 1;
+        transform: scale(1);
+      }
+      .delete-btn {
+        position: absolute;
+        top: -2px;
+        right: 12px;
+        width: 16px;
+        height: 16px;
+        background: #f44336;
+        color: white;
+        border-radius: 50%;
+        font-size: 12px;
+        line-height: 16px;
+        text-align: center;
+        cursor: pointer;
+        z-index: 1001;
+      }
+      .add-ideas {
+        position: absolute;
+        background: #4caf50;
+        color: white;
+        font-size: 12px;
+        padding: 5px 10px;
+        border-radius: 5px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      #input-container {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        padding: 10px;
+        border-radius: 10px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        width: 500px;
+      }
+      #main-idea-input {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 16px;
+        background: #1e1e1e;
+        border: 1px solid #4caf50;
+        color: white;
+        border-radius: 5px;
+      }
+      #submit-idea {
+        background: #4caf50;
+        border: none;
+        padding: 5px 10px;
+        font-size: 16px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <button id="reset-btn">Reset</button>
+      <button id="fit-btn">Fit Bounds</button>
+      <button id="zoom-in-btn">Zoom In</button>
+      <button id="zoom-out-btn">Zoom Out</button>
+    </div>
+    <div id="canvas"><svg id="lines"></svg></div>
+    <div id="input-container">
+      <input
+        id="main-idea-input"
+        type="text"
+        placeholder="Enter your main idea..."
+      />
+      <button id="submit-idea">Start</button>
+    </div>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const canvas = document.getElementById('canvas');
+        const linesSvg = document.getElementById('lines');
+        const inputContainer = document.getElementById('input-container');
+        const mainIdeaInput = document.getElementById('main-idea-input');
+        const submitIdeaBtn = document.getElementById('submit-idea');
+        const resetBtn = document.getElementById('reset-btn');
+        const fitBtn = document.getElementById('fit-btn');
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+
+        let mainIdea = '';
+        let scale = 1,
+          offsetX = 0,
+          offsetY = 0;
+        let isDraggingCanvas = false,
+          startX = 0,
+          startY = 0;
+        let draggingNode = null,
+          dragStartX = 0,
+          dragStartY = 0;
+        let subtreeNodes = [];
+
+        const nodes = [];
+        const links = [];
+        const buttons = [];
+
+        function getSubtreeNodes(nodeEl) {
+          const result = [];
+          function traverse(el) {
+            result.push(el);
+            links
+              .filter((l) => l.parent === el)
+              .forEach((l) => traverse(l.child));
+          }
+          traverse(nodeEl);
+          return result;
+        }
+
+        function getDepth(nodeEl) {
+          const rec = nodes.find((r) => r.el === nodeEl);
+          return rec && rec.parent ? 1 + getDepth(rec.parent) : 0;
+        }
+
+        function onNodeMouseDown(e, nodeEl) {
+          e.stopPropagation();
+          e.preventDefault();
+          draggingNode = nodeEl;
+          dragStartX = e.clientX;
+          dragStartY = e.clientY;
+          subtreeNodes = getSubtreeNodes(nodeEl).map((el) => ({
+            el,
+            startX: +el.dataset.x,
+            startY: +el.dataset.y,
+          }));
+          window.addEventListener('mousemove', onNodeMouseMove);
+          window.addEventListener('mouseup', onNodeMouseUp);
+        }
+        function onNodeMouseMove(e) {
+          if (!draggingNode) return;
+          const dx = (e.clientX - dragStartX) / scale;
+          const dy = (e.clientY - dragStartY) / scale;
+          subtreeNodes.forEach(({ el, startX, startY }) => {
+            const newX = startX + dx;
+            const newY = startY + dy;
+            el.dataset.x = newX;
+            el.dataset.y = newY;
+            el.style.left = newX + 'px';
+            el.style.top = newY + 'px';
+          });
+          updateLines();
+          updateButtons();
+        }
+        function onNodeMouseUp() {
+          window.removeEventListener('mousemove', onNodeMouseMove);
+          window.removeEventListener('mouseup', onNodeMouseUp);
+          draggingNode = null;
+          subtreeNodes = [];
+        }
+
+        resetBtn.addEventListener('click', () => {
+          nodes.forEach((n) => canvas.removeChild(n.el));
+          links.forEach((l) => linesSvg.removeChild(l.line));
+          buttons.forEach((b) => canvas.removeChild(b.btn));
+          nodes.length = links.length = buttons.length = 0;
+          inputContainer.style.display = 'flex';
+          mainIdeaInput.value = '';
+          scale = 1;
+          offsetX = offsetY = 0;
+          applyCanvasTransform();
+        });
+
+        function animateTransform(from, to, duration = 400) {
+          const start = performance.now();
+          function step(now) {
+            const t = Math.min((now - start) / duration, 1);
+            const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+            scale = from.scale + (to.scale - from.scale) * ease;
+            offsetX = from.offsetX + (to.offsetX - from.offsetX) * ease;
+            offsetY = from.offsetY + (to.offsetY - from.offsetY) * ease;
+            applyCanvasTransform();
+            updateLines();
+            if (t < 1) requestAnimationFrame(step);
+          }
+          requestAnimationFrame(step);
+        }
+
+        fitBtn.addEventListener('click', () => {
+          const b = getBounds();
+          if (!b) return;
+          const pad = 100;
+          const sw = window.innerWidth / (b.width + pad * 2);
+          const sh = window.innerHeight / (b.height + pad * 2);
+          const targetScale = Math.min(sw, sh, 2);
+          const cx = (b.minX + b.maxX) / 2;
+          const cy = (b.minY + b.maxY) / 2;
+
+          const from = { scale, offsetX, offsetY };
+          animateTransform(
+            from,
+            {
+              scale: targetScale,
+              offsetX: window.innerWidth / 2 - cx * targetScale,
+              offsetY: window.innerHeight / 2 - cy * targetScale,
+            },
+            500
+          );
+        });
+
+        zoomInBtn.addEventListener('click', () => {
+          const factor = 1.2;
+          const cx = window.innerWidth / 2,
+            cy = window.innerHeight / 2;
+          const from = { scale, offsetX, offsetY };
+          const toScale = scale * factor;
+          const toOffsetX = offsetX * factor + (1 - factor) * cx;
+          const toOffsetY = offsetY * factor + (1 - factor) * cy;
+          animateTransform(from, {
+            scale: toScale,
+            offsetX: toOffsetX,
+            offsetY: toOffsetY,
+          });
+        });
+
+        zoomOutBtn.addEventListener('click', () => {
+          const factor = 1 / 1.2;
+          const cx = window.innerWidth / 2,
+            cy = window.innerHeight / 2;
+          const from = { scale, offsetX, offsetY };
+          const toScale = scale * factor;
+          const toOffsetX = offsetX * factor + (1 - factor) * cx;
+          const toOffsetY = offsetY * factor + (1 - factor) * cy;
+          animateTransform(from, {
+            scale: toScale,
+            offsetX: toOffsetX,
+            offsetY: toOffsetY,
+          });
+        });
+
+        function drawInitial() {
+          const cw = canvas.clientWidth,
+            ch = canvas.clientHeight;
+          const cx = cw / 2,
+            cy = ch / 2;
+          const main = createNode(mainIdea, cx, cy, null, '#4caf50', 0);
+          ['1', '2', '3', '4', '5'].forEach((s, i) => {
+            const angle = (i / 5) * 2 * Math.PI;
+            const x = cx + 200 * Math.cos(angle),
+              y = cy + 200 * Math.sin(angle);
+            const col = randomPastelColor();
+            const nd = createNode('Sub ' + s, x, y, main, col, angle);
+            createLink(main, nd);
+            const btn = createButton(nd);
+            buttons.push({ btn, node: nd });
+          });
+          updateButtons();
+          fitBounds();
+          applyCanvasTransform();
+          updateLines();
+        }
+        function addMoreIdeas(parentNode) {
+          // 1) clear existing subtree
+          links
+            .filter((l) => l.parent === parentNode)
+            .forEach((l) => removeSubtree(l.child));
+
+          const depth = 1 + getDepth(parentNode);
+          const radius = 150 + depth * 100; // how far out from the parent
+          const px = +parentNode.dataset.x + +parentNode.dataset.size / 2;
+          const py = +parentNode.dataset.y + +parentNode.dataset.size / 2;
+          const color = parentNode.dataset.color;
+          const parentAng = parseFloat(parentNode.dataset.angle);
+          const ideas = ['A', 'B', 'C', 'D'];
+
+          // choose a ±spread around the parent direction
+          const spread = Math.PI / 3; // 60° total
+          const half = spread / 2;
+
+          ideas.forEach((label, i) => {
+            // evenly space within [parentAng - half, parentAng + half]
+            const t = ideas.length > 1 ? i / (ideas.length - 1) : 0.5;
+            const ang = parentAng - half + t * spread;
+            const x = px + radius * Math.cos(ang);
+            const y = py + radius * Math.sin(ang);
+
+            const node = createNode(
+              'Idea ' + label,
+              x,
+              y,
+              parentNode,
+              color,
+              ang
+            );
+            createLink(parentNode, node);
+            const btn = createButton(node);
+            buttons.push({ btn, node });
+          });
+
+          updateButtons();
+          fitBounds();
+          applyCanvasTransform();
+          updateLines();
+        }
+
+        function removeSubtree(nodeEl) {
+          const rec = nodes.find((r) => r.el === nodeEl);
+          const parentEl = rec.parent;
+          // never delete main
+          if (!parentEl) return;
+          // ensure main always has >=1 child
+          const parentRec = nodes.find((r) => r.el === parentEl);
+          if (
+            !parentRec.parent &&
+            links.filter((l) => l.parent === parentEl).length <= 1
+          ) {
+            alert('Main node must have at least 1 child.');
+            return;
+          }
+          // remove descendants
+          links
+            .filter((l) => l.parent === nodeEl)
+            .forEach((l) => removeSubtree(l.child));
+          // remove link lines
+          links
+            .filter((l) => l.child === nodeEl)
+            .forEach((l) => linesSvg.removeChild(l.line));
+          // clean links array
+          for (let i = links.length - 1; i >= 0; i--) {
+            if (links[i].parent === nodeEl || links[i].child === nodeEl)
+              links.splice(i, 1);
+          }
+          // remove buttons
+          for (let i = buttons.length - 1; i >= 0; i--) {
+            if (buttons[i].node === nodeEl) {
+              canvas.removeChild(buttons[i].btn);
+              buttons.splice(i, 1);
+            }
+          }
+          // remove node element
+          const idx = nodes.findIndex((r) => r.el === nodeEl);
+          if (idx > -1) {
+            canvas.removeChild(nodeEl);
+            nodes.splice(idx, 1);
+          }
+          // update UI
+          updateButtons();
+          updateLines();
+        }
+
+        function createButton(nodeEl) {
+          const btn = document.createElement('div');
+          btn.className = 'add-ideas';
+          btn.addEventListener('click', () => addMoreIdeas(nodeEl));
+          canvas.appendChild(btn);
+          return btn;
+        }
+
+        function updateButtons() {
+          buttons.forEach(({ btn, node }) => {
+            const x = +node.dataset.x;
+            const y = +node.dataset.y;
+            const s = +node.dataset.size;
+            btn.style.left = x + s / 2 - btn.offsetWidth / 2 + 'px';
+            btn.style.top = y + s + 5 + 'px';
+            btn.innerText = links.some((l) => l.parent === node)
+              ? 'Recreate Ideas'
+              : '+ Add Ideas';
+          });
+          updateDeleteButtons();
+        }
+
+        function updateDeleteButtons() {
+          nodes.forEach(({ el, parent }) => {
+            if (!parent) return;
+            const siblings = links.filter((l) => l.parent === parent);
+            const del = el.querySelector('.delete-btn');
+            if (!del) return;
+            del.style.display = siblings.length <= 1 ? 'none' : 'block';
+          });
+        }
+
+        function randomPastelColor() {
+          return `hsl(${Math.floor(Math.random() * 360)},30%,80%)`;
+        }
+
+        function createNode(
+          text,
+          cx,
+          cy,
+          parent = null,
+          color = '#4caf50',
+          angle = 0
+        ) {
+          const depth = parent ? 1 + getDepth(parent) : 0;
+          const base = 120,
+            step = 20;
+          const size = Math.max(40, base - depth * step);
+          const x = cx - size / 2;
+          const y = cy - size / 2;
+          const node = document.createElement('div');
+          node.className = 'node';
+          node.innerText = text;
+          node.dataset.x = x;
+          node.dataset.y = y;
+          node.dataset.size = size;
+          node.dataset.color = color;
+          node.dataset.angle = angle;
+          node.style.left = x + 'px';
+          node.style.top = y + 'px';
+          node.style.width = size + 'px';
+          node.style.height = size + 'px';
+          node.style.borderColor = color;
+          canvas.appendChild(node);
+          if (parent !== null) {
+            const del = document.createElement('div');
+            del.className = 'delete-btn';
+            del.textContent = '×';
+            del.addEventListener('click', (e) => {
+              e.stopPropagation();
+              removeSubtree(node);
+            });
+            node.appendChild(del);
+          }
+          node.addEventListener('mousedown', (e) => onNodeMouseDown(e, node));
+          requestAnimationFrame(() => node.classList.add('show'));
+          nodes.push({ el: node, parent });
+          return node;
+        }
+
+        function createLink(parentNode, childNode) {
+          const line = document.createElementNS(
+            'http://www.w3.org/2000/svg',
+            'line'
+          );
+          line.setAttribute('stroke', parentNode.dataset.color);
+          line.setAttribute('stroke-width', '2');
+          linesSvg.appendChild(line);
+          links.push({ line, parent: parentNode, child: childNode });
+        }
+
+        function checkOverlap(x, y) {
+          return nodes.some(
+            ({ el }) => Math.hypot(x - +el.dataset.x, y - +el.dataset.y) < 150
+          );
+        }
+
+        function updateLines() {
+          links.forEach(({ line, parent, child }) => {
+            const px = +parent.dataset.x + +parent.dataset.size / 2;
+            const py = +parent.dataset.y + +parent.dataset.size / 2;
+            const cx = +child.dataset.x + +child.dataset.size / 2;
+            const cy = +child.dataset.y + +child.dataset.size / 2;
+            line.setAttribute('x1', px);
+            line.setAttribute('y1', py);
+            line.setAttribute('x2', cx);
+            line.setAttribute('y2', cy);
+          });
+        }
+
+        function getBounds() {
+          if (!nodes.length) return null;
+          let minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
+          nodes.forEach(({ el }) => {
+            const x = +el.dataset.x,
+              y = +el.dataset.y,
+              s = +el.dataset.size;
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x + s);
+            maxY = Math.max(maxY, y + s);
+          });
+          return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            width: maxX - minX,
+            height: maxY - minY,
+          };
+        }
+
+        function fitBounds() {
+          const b = getBounds();
+          if (!b) return;
+          const pad = 100;
+          scale = Math.min(
+            window.innerWidth / (b.width + pad * 2),
+            window.innerHeight / (b.height + pad * 2),
+            2
+          );
+          const cx = (b.minX + b.maxX) / 2;
+          const cy = (b.minY + b.maxY) / 2;
+          offsetX = window.innerWidth / 2 - cx * scale;
+          offsetY = window.innerHeight / 2 - cy * scale;
+        }
+
+        function clampOffset() {
+          offsetX = Math.min(
+            Math.max(offsetX, window.innerWidth - canvas.clientWidth * scale),
+            0
+          );
+          offsetY = Math.min(
+            Math.max(offsetY, window.innerHeight - canvas.clientHeight * scale),
+            0
+          );
+        }
+
+        function applyCanvasTransform() {
+          clampOffset();
+          canvas.style.transform = `translate(${offsetX}px,${offsetY}px) scale(${scale})`;
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+          isDraggingCanvas = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          canvas.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mousemove', (e) => {
+          if (!isDraggingCanvas) return;
+          offsetX += (e.clientX - startX) / scale;
+          offsetY += (e.clientY - startY) / scale;
+          startX = e.clientX;
+          startY = e.clientY;
+          applyCanvasTransform();
+          updateLines();
+        });
+        window.addEventListener('mouseup', () => {
+          isDraggingCanvas = false;
+          canvas.style.cursor = 'grab';
+        });
+
+        submitIdeaBtn.addEventListener('click', () => {
+          const v = mainIdeaInput.value.trim();
+          if (!v) return alert('Main idea cannot be empty.');
+          mainIdea = v;
+          inputContainer.style.display = 'none';
+          drawInitial();
+        });
+      });
+    </script>
+  </body>
+</html>
